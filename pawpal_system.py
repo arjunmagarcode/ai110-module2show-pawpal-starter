@@ -1,6 +1,8 @@
 """Core backend models and scheduler implementation for PawPal+."""
 
+from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 from typing import List, Optional
 
 
@@ -15,11 +17,43 @@ def _normalize_lower(value: str, fallback: str) -> str:
     return normalized if normalized else fallback
 
 
+def _normalize_time(value: str) -> str:
+    """Normalize a HH:MM string to a zero-padded 24-hour time."""
+    text = value.strip()
+    if not text:
+        return "09:00"
+
+    parts = text.split(":")
+    if len(parts) != 2 or not parts[0].isdigit() or not parts[1].isdigit():
+        return "09:00"
+
+    hour = max(0, min(23, int(parts[0])))
+    minute = max(0, min(59, int(parts[1])))
+    return f"{hour:02d}:{minute:02d}"
+
+
+def _time_to_minutes(value: str) -> int:
+    """Convert a HH:MM string into total minutes since midnight."""
+    hour, minute = value.split(":")
+    return int(hour) * 60 + int(minute)
+
+
+def _advance_due_date(current_due_date: date, frequency: str) -> date:
+    """Return the next due date for a recurring task."""
+    if frequency == "daily":
+        return current_due_date + timedelta(days=1)
+    if frequency == "weekly":
+        return current_due_date + timedelta(days=7)
+    return current_due_date
+
+
 @dataclass
 class Task:
     description: str
     time_minutes: int
+    scheduled_time: str = "09:00"
     frequency: str = "once"
+    due_date: date = field(default_factory=date.today)
     completed: bool = False
     priority: str = "medium"
     category: str = "general"
@@ -29,6 +63,7 @@ class Task:
         """Normalize task fields after initialization."""
         self.description = _normalize_text(self.description)
         self.time_minutes = max(0, int(self.time_minutes))
+        self.scheduled_time = _normalize_time(self.scheduled_time)
         self.frequency = _normalize_lower(self.frequency, "once")
         self.priority = _normalize_lower(self.priority, "medium")
         self.category = _normalize_lower(self.category, "general")
@@ -46,7 +81,28 @@ class Task:
     @property
     def recurring(self) -> bool:
         """Return whether the task repeats on a schedule."""
-        return self.frequency not in {"once", "one-time", "single"}
+        return self.frequency in {"daily", "weekly"}
+
+    def next_occurrence_date(self) -> date:
+        """Return the next due date for a recurring task."""
+        return _advance_due_date(self.due_date, self.frequency)
+
+    def create_follow_up_instance(self) -> Optional["Task"]:
+        """Create the next recurring instance for this task."""
+        if not self.recurring:
+            return None
+
+        return Task(
+            description=self.description,
+            time_minutes=self.time_minutes,
+            scheduled_time=self.scheduled_time,
+            frequency=self.frequency,
+            due_date=self.next_occurrence_date(),
+            completed=False,
+            priority=self.priority,
+            category=self.category,
+            pet_name=self.pet_name,
+        )
 
     def mark_complete(self) -> None:
         """Mark the task as complete."""
@@ -65,8 +121,8 @@ class Task:
         status = "done" if self.completed else "pending"
         pet_label = f" for {self.pet_name}" if self.pet_name else ""
         return (
-            f"{self.description}{pet_label} ({self.time_minutes} min, {self.frequency}, "
-            f"priority: {self.priority}, {status})"
+            f"{self.description}{pet_label} on {self.due_date.isoformat()} at {self.scheduled_time} "
+            f"({self.time_minutes} min, {self.frequency}, priority: {self.priority}, {status})"
         )
 
     def is_high_priority(self) -> bool:
@@ -198,62 +254,107 @@ class Scheduler:
 
         return collected_tasks
 
-    def generate_schedule(self) -> List[Task]:
-        """Generate the day's scheduled tasks."""
-        return self.filter_tasks()
-
-    def sort_tasks(self) -> List[Task]:
-        """Sort tasks by completion, priority, frequency, and duration."""
-        priority_order = {"high": 0, "medium": 1, "low": 2}
-        frequency_order = {"once": 0, "daily": 1, "weekly": 2}
-
-        tasks = self.collect_tasks()
-
+    def sort_by_time(self, tasks: Optional[List[Task]] = None) -> List[Task]:
+        """Sort tasks by scheduled time, due date, pet, and description."""
+        tasks_to_sort = self.collect_tasks() if tasks is None else list(tasks)
         return sorted(
-            tasks,
+            tasks_to_sort,
             key=lambda task: (
-                task.completed,
-                priority_order.get(task.priority, 3),
-                frequency_order.get(task.frequency, 3),
-                task.time_minutes,
-                task.description.lower(),
+                _time_to_minutes(task.scheduled_time),
+                task.due_date,
                 task.pet_name or "",
+                task.description.lower(),
             ),
         )
 
-    def filter_tasks(self) -> List[Task]:
-        """Keep the highest-value tasks that fit into the owner's time."""
-        remaining_minutes = self.owner.available_minutes
-        planned_tasks: List[Task] = []
+    def sort_tasks(self) -> List[Task]:
+        """Provide a compatibility alias for the time-based sorter."""
+        return self.sort_by_time()
 
-        for task in self.sort_tasks():
-            if task.completed:
-                continue
+    def filter_tasks(
+        self,
+        pet_name: Optional[str] = None,
+        completed: Optional[bool] = None,
+        as_of: Optional[date] = None,
+        tasks: Optional[List[Task]] = None,
+    ) -> List[Task]:
+        """Filter tasks by pet, completion status, and due date."""
+        filtered_tasks = self.collect_tasks() if tasks is None else list(tasks)
 
-            if task.time_minutes <= remaining_minutes:
-                planned_tasks.append(task)
-                remaining_minutes -= task.time_minutes
+        if pet_name is not None:
+            normalized_pet_name = _normalize_text(pet_name)
+            filtered_tasks = [
+                task for task in filtered_tasks if task.pet_name == normalized_pet_name
+            ]
 
-        return planned_tasks
+        if completed is not None:
+            filtered_tasks = [task for task in filtered_tasks if task.completed == completed]
 
-    def explain_choice(self) -> str:
+        if as_of is not None:
+            filtered_tasks = [task for task in filtered_tasks if task.due_date <= as_of]
+
+        return self.sort_by_time(filtered_tasks)
+
+    def generate_schedule(self, as_of: Optional[date] = None) -> List[Task]:
+        """Generate the day's scheduled tasks."""
+        return self.filter_tasks(completed=False, as_of=as_of)
+
+    def explain_choice(self, as_of: Optional[date] = None) -> str:
         """Explain why the scheduler chose the current plan."""
-        planned_tasks = self.filter_tasks()
+        planned_tasks = self.generate_schedule(as_of=as_of)
 
         if not planned_tasks:
             return f"No pending tasks fit into the available time for {self.owner.name}."
 
         task_names = ", ".join(task.get_summary() for task in planned_tasks)
         return (
-            f"Tasks were chosen for {self.owner.name} by priority, frequency, and available time: "
+            f"Tasks were chosen for {self.owner.name} by time, due date, and filters: "
             f"{task_names}."
         )
 
-    def mark_task_complete(self, task: Task) -> None:
-        """Mark a task as complete through the scheduler."""
+    def mark_task_complete(self, task: Task) -> Optional[Task]:
+        """Mark a task complete and queue the next recurring instance if needed."""
         task.mark_complete()
+
+        if not task.recurring:
+            return None
+
+        pet = self.owner.get_pet(task.pet_name or "")
+        if pet is None:
+            return None
+
+        next_task = task.create_follow_up_instance()
+        if next_task is None:
+            return None
+
+        pet.add_task(next_task)
+        return next_task
 
     def get_tasks_by_pet(self, pet_name: str) -> List[Task]:
         """Return tasks that belong to the named pet."""
-        normalized_name = _normalize_text(pet_name)
-        return [task for task in self.collect_tasks() if task.pet_name == normalized_name]
+        return self.filter_tasks(pet_name=pet_name)
+
+    def get_tasks_by_status(self, completed: bool) -> List[Task]:
+        """Return tasks by completion state."""
+        return self.filter_tasks(completed=completed)
+
+    def detect_conflicts(self, tasks: Optional[List[Task]] = None) -> List[str]:
+        """Return warnings for tasks that share the same date and time."""
+        tasks_to_check = self.collect_tasks() if tasks is None else list(tasks)
+        grouped_tasks = defaultdict(list)
+
+        for task in tasks_to_check:
+            grouped_tasks[(task.due_date.isoformat(), task.scheduled_time)].append(task)
+
+        warnings: List[str] = []
+        for (due_date_text, scheduled_time), conflict_tasks in grouped_tasks.items():
+            if len(conflict_tasks) < 2:
+                continue
+
+            pet_names = sorted({task.pet_name or "Unknown pet" for task in conflict_tasks})
+            task_names = ", ".join(task.description for task in conflict_tasks)
+            warnings.append(
+                f"Conflict on {due_date_text} at {scheduled_time} for {', '.join(pet_names)}: {task_names}"
+            )
+
+        return warnings

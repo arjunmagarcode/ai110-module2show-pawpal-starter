@@ -47,16 +47,34 @@ pip install -r requirements.txt
 Output from running `python main.py`:
 
 ```
-Today's Schedule for Jordan
-1. Mochi - Morning feeding (10 min, daily, priority: high)
-2. Pip - Walk (30 min, daily, priority: high)
-3. Mochi - Litter box clean (15 min, daily, priority: medium)
-Total planned time: 55 minutes
+Today's Schedule (sorted by time)
+1. Pip - Walk @ 06:30 (30 min, due 2026-07-05, daily, priority: high, pending)
+2. Mochi - Morning feeding @ 07:15 (10 min, due 2026-07-05, daily, priority: high, pending)
+3. Pip - Medication @ 07:15 (5 min, due 2026-07-05, daily, priority: high, pending)
+4. Mochi - Brush coat @ 18:30 (15 min, due 2026-07-05, weekly, priority: medium, pending)
+Total planned time: 60 minutes
 
-Tasks were chosen for Jordan by priority, frequency, and available time: Morning
- feeding for Mochi (10 min, daily, priority: high, pending), Walk for Pip (30 mi
-n, daily, priority: high, pending), Litter box clean for Mochi (15 min, daily, p
-riority: medium, pending).
+Mochi's pending tasks
+1. Mochi - Morning feeding @ 07:15 (10 min, due 2026-07-05, daily, priority: high, pending)
+2. Mochi - Brush coat @ 18:30 (15 min, due 2026-07-05, weekly, priority: medium, pending)
+Total planned time: 25 minutes
+
+Conflict check
+- Conflict on 2026-07-05 at 07:15 for Mochi, Pip: Morning feeding, Medication
+
+Recurring task rollover
+Completed: Mochi - Morning feeding @ 07:15 (10 min, due 2026-07-05, daily, priority: high, done)
+Queued next instance: Mochi - Morning feeding @ 07:15 (10 min, due 2026-07-06, daily, priority: high, pending)
+
+All tasks after rollover
+1. Pip - Walk @ 06:30 (30 min, due 2026-07-05, daily, priority: high, pending)
+2. Mochi - Morning feeding @ 07:15 (10 min, due 2026-07-05, daily, priority: high, done)
+3. Pip - Medication @ 07:15 (5 min, due 2026-07-05, daily, priority: high, pending)
+4. Mochi - Morning feeding @ 07:15 (10 min, due 2026-07-06, daily, priority: high, pending)
+5. Mochi - Brush coat @ 18:30 (15 min, due 2026-07-05, weekly, priority: medium, pending)
+Total planned time: 70 minutes
+
+Tasks were chosen for Jordan by time, due date, and filters: Walk for Pip on 2026-07-05 at 06:30 (30 min, daily, priority: high, pending), Medication for Pip on 2026-07-05 at 07:15 (5 min, daily, priority: high, pending), Brush coat for Mochi on 2026-07-05 at 18:30 (15 min, weekly, priority: medium, pending).
 ```
 
 ## 🧪 Testing PawPal+
@@ -72,19 +90,24 @@ pytest --cov
 Sample test output:
 
 ```
-# Paste your pytest output here
+============================= test session starts ==============================
+platform darwin -- Python 3.14.5, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/w10182531/Desktop/ai110-module2show-pawpal-starter
+collected 6 items
+
+tests/test_pawpal.py ......                                              [100%]
+
+============================== 6 passed in 0.02s ===============================
 ```
 
 ## 📐 Smarter Scheduling
 
-> Fill in once you've implemented scheduling logic.
-
 | Feature | Method(s) | Notes |
 |---------|-----------|-------|
-| Task sorting | | e.g., by priority, duration |
-| Filtering | | e.g., skip tasks if time runs out |
-| Conflict handling | | e.g., overlapping time slots |
-| Recurring tasks | | e.g., daily vs. weekly |
+| Task sorting | `Scheduler.sort_by_time()` | Sorts tasks by `scheduled_time`, then due date and pet name. |
+| Filtering | `Scheduler.filter_tasks()`, `Scheduler.get_tasks_by_pet()`, `Scheduler.get_tasks_by_status()` | Filters by pet name, completion status, and due date. |
+| Conflict handling | `Scheduler.detect_conflicts()` | Warns when two tasks share the same date and start time. |
+| Recurring tasks | `Scheduler.mark_task_complete()`, `Task.create_follow_up_instance()` | Automatically queues the next daily or weekly instance. |
 
 ## 📸 Demo Walkthrough
 

@@ -1,4 +1,5 @@
 import streamlit as st
+from datetime import date, time
 
 from pawpal_system import Owner, Pet, Scheduler, Task
 
@@ -33,6 +34,8 @@ def format_task_rows(tasks: list[Task]) -> list[dict[str, object]]:
             {
                 "Pet": task.pet_name or "Unknown",
                 "Task": task.description,
+                "Date": task.due_date.isoformat(),
+                "Start": task.scheduled_time,
                 "Minutes": task.time_minutes,
                 "Frequency": task.frequency,
                 "Priority": task.priority,
@@ -118,6 +121,8 @@ if pet_options:
             index=default_pet_index,
         )
         task_description = st.text_input("Task description", value="Morning feeding")
+        task_date = st.date_input("Due date", value=date.today())
+        task_time = st.time_input("Start time", value=time(9, 0))
         task_minutes = st.number_input(
             "Duration (minutes)",
             min_value=1,
@@ -139,7 +144,9 @@ if pet_options:
                 Task(
                     task_description,
                     int(task_minutes),
+                    scheduled_time=task_time.strftime("%H:%M"),
                     frequency=task_frequency,
+                    due_date=task_date,
                     priority=task_priority,
                     category=task_category,
                 )
@@ -174,10 +181,39 @@ st.subheader("Today's Schedule")
 st.caption("The scheduler reads from the owner's pets stored in session state.")
 
 scheduler = Scheduler(owner)
-schedule = scheduler.generate_schedule()
+
+selected_date = st.date_input("Schedule date", value=date.today())
+filter_col1, filter_col2 = st.columns(2)
+with filter_col1:
+    pet_filter_options = ["All pets", *pet_options] if pet_options else ["All pets"]
+    selected_pet_filter = st.selectbox("Filter by pet", pet_filter_options)
+with filter_col2:
+    selected_status_filter = st.selectbox("Filter by status", ["pending", "completed", "all"])
+
+completed_filter = None
+if selected_status_filter == "pending":
+    completed_filter = False
+elif selected_status_filter == "completed":
+    completed_filter = True
+
+pet_filter = None if selected_pet_filter == "All pets" else selected_pet_filter
+
+schedule = scheduler.filter_tasks(
+    pet_name=pet_filter,
+    completed=completed_filter,
+    as_of=selected_date,
+)
+
+conflicts = scheduler.detect_conflicts(schedule)
+if conflicts:
+    st.warning("Task conflicts detected for this view:")
+    for warning in conflicts:
+        st.warning(warning)
+else:
+    st.success("No time conflicts found for the selected schedule view.")
 
 if schedule:
     st.table(format_task_rows(schedule))
-    st.write(scheduler.explain_choice())
+    st.write(scheduler.explain_choice(as_of=selected_date))
 else:
-    st.info("No tasks fit into today's schedule yet. Add pets and tasks above.")
+    st.info("No tasks match this date/filter combination yet. Add pets and tasks above.")

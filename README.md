@@ -22,6 +22,14 @@ Your final app should:
 - Display the plan clearly (and ideally explain the reasoning)
 - Include tests for the most important scheduling behaviors
 
+## ✨ Features
+
+- Time-first scheduling: tasks are sorted chronologically by `scheduled_time`, then stabilized by due date and pet.
+- Smart filtering: schedules can be filtered by pet, completion status, and due date cutoff.
+- Conflict warnings: the scheduler flags tasks that share the same date and start time.
+- Recurring rollover: completing daily/weekly tasks automatically queues the next instance.
+- Streamlit integration: owner/pet/task data persists in `st.session_state` while users interact with forms.
+
 ## Getting started
 
 ### Setup
@@ -81,7 +89,7 @@ Tasks were chosen for Jordan by time, due date, and filters: Walk for Pip on 202
 
 ```bash
 # Run the full test suite:
-pytest
+python -m pytest
 
 # Run with coverage:
 pytest --cov
@@ -116,12 +124,24 @@ tests/test_pawpal.py .......                                             [100%]
 
 ## 📸 Demo Walkthrough
 
-Describe your app in numbered steps so a reader can follow along without watching a video:
+1. Open the app and set owner preferences in **Owner Settings** (name + available minutes).
+2. Add one or more pets in **Add a Pet** and confirm each appears under **Current Pets**.
+3. Add tasks with date/time, duration, frequency, and priority in **Add a Task**.
+4. Use **Today's Schedule** controls to filter by date, pet, and status, and view the sorted schedule table.
+5. Review scheduler output:
+	- Time-sorted rows in the schedule table
+	- Conflict warnings via Streamlit `st.warning` when two tasks share the same date/time
+	- Natural-language explanation text from `Scheduler.explain_choice()`
 
-1. <!-- Describe this step -->
-2. <!-- Describe this step -->
-3. <!-- Describe this step -->
-4. <!-- Describe this step -->
-5. <!-- Add more steps as needed -->
+CLI demo output (`python main.py`):
+
+```text
+Today's Schedule (sorted by time)
+1. Pip - Walk @ 06:30 (30 min, due 2026-07-05, daily, priority: high, pending)
+2. Mochi - Morning feeding @ 07:15 (10 min, due 2026-07-05, daily, priority: high, pending)
+3. Pip - Medication @ 07:15 (5 min, due 2026-07-05, daily, priority: high, pending)
+4. Mochi - Brush coat @ 18:30 (15 min, due 2026-07-05, weekly, priority: medium, pending)
+Total planned time: 60 minutes
+```
 
 **Screenshot or video** *(optional)*: <!-- Insert a screenshot or link to a demo video here -->

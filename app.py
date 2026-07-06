@@ -1,16 +1,22 @@
 import streamlit as st
 from datetime import date, time
+from pathlib import Path
 
 from pawpal_system import Owner, Pet, Scheduler, Task
 
 
 st.set_page_config(page_title="PawPal+", page_icon="🐾", layout="centered")
 
+DATA_FILE = "data.json"
+
 
 def initialize_session_state() -> None:
     """Create the persistent owner object the first time the app loads."""
     if "owner" not in st.session_state:
-        st.session_state.owner = Owner("Jordan", available_minutes=60)
+        if Path(DATA_FILE).exists():
+            st.session_state.owner = Owner.load_from_json(DATA_FILE)
+        else:
+            st.session_state.owner = Owner("Jordan", available_minutes=60)
 
     if "selected_pet_name" not in st.session_state:
         st.session_state.selected_pet_name = ""
@@ -28,6 +34,7 @@ def get_pet_options(owner: Owner) -> list[str]:
 
 def format_task_rows(tasks: list[Task]) -> list[dict[str, object]]:
     """Convert tasks into table-friendly rows."""
+    priority_icons = {"high": "🔴 High", "medium": "🟡 Medium", "low": "🟢 Low"}
     rows: list[dict[str, object]] = []
     for task in tasks:
         rows.append(
@@ -38,8 +45,8 @@ def format_task_rows(tasks: list[Task]) -> list[dict[str, object]]:
                 "Start": task.scheduled_time,
                 "Minutes": task.time_minutes,
                 "Frequency": task.frequency,
-                "Priority": task.priority,
-                "Completed": task.completed,
+                "Priority": priority_icons.get(task.priority, task.priority),
+                "Status": "✅ Done" if task.completed else "🕒 Pending",
             }
         )
     return rows
@@ -84,6 +91,18 @@ if save_owner:
     owner.set_availability(int(available_minutes))
     owner.update_preferences(preferences)
     st.success("Owner settings saved.")
+
+persist_col1, persist_col2 = st.columns(2)
+with persist_col1:
+    if st.button("Save data to data.json"):
+        owner.save_to_json(DATA_FILE)
+        st.success("Saved owner, pets, and tasks to data.json.")
+with persist_col2:
+    if st.button("Load data from data.json"):
+        st.session_state.owner = Owner.load_from_json(DATA_FILE)
+        st.session_state.selected_pet_name = ""
+        st.success("Loaded data from data.json.")
+        st.rerun()
 
 st.divider()
 
@@ -206,11 +225,17 @@ schedule = scheduler.filter_tasks(
 
 conflicts = scheduler.detect_conflicts(schedule)
 if conflicts:
-    st.warning("Task conflicts detected for this view:")
+    st.warning("Task conflicts detected. Consider moving one of these tasks to a different start time.")
     for warning in conflicts:
         st.warning(warning)
 else:
     st.success("No time conflicts found for the selected schedule view.")
+
+next_slot = scheduler.find_next_available_slot(selected_date, duration_minutes=30)
+if next_slot is not None:
+    st.info(f"Next available 30-minute slot on {selected_date.isoformat()}: {next_slot}")
+else:
+    st.info("No free 30-minute slot was found for the selected day.")
 
 if schedule:
     st.table(format_task_rows(schedule))

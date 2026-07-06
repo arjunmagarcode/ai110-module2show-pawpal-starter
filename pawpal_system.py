@@ -1,8 +1,10 @@
 """Core backend models and scheduler implementation for PawPal+."""
 
+import json
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from pathlib import Path
 from typing import List, Optional
 
 
@@ -36,6 +38,13 @@ def _time_to_minutes(value: str) -> int:
     """Convert a HH:MM string into total minutes since midnight."""
     hour, minute = value.split(":")
     return int(hour) * 60 + int(minute)
+
+
+def _minutes_to_time(value: int) -> str:
+    """Convert total minutes since midnight into HH:MM format."""
+    hour = value // 60
+    minute = value % 60
+    return f"{hour:02d}:{minute:02d}"
 
 
 def _advance_due_date(current_due_date: date, frequency: str) -> date:
@@ -104,6 +113,36 @@ class Task:
             pet_name=self.pet_name,
         )
 
+    def to_dict(self) -> dict:
+        """Serialize the task into a JSON-safe dictionary."""
+        return {
+            "description": self.description,
+            "time_minutes": self.time_minutes,
+            "scheduled_time": self.scheduled_time,
+            "frequency": self.frequency,
+            "due_date": self.due_date.isoformat(),
+            "completed": self.completed,
+            "priority": self.priority,
+            "category": self.category,
+            "pet_name": self.pet_name,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict) -> "Task":
+        """Create a task from a JSON dictionary payload."""
+        due_date_text = payload.get("due_date") or date.today().isoformat()
+        return cls(
+            description=payload.get("description", ""),
+            time_minutes=int(payload.get("time_minutes", 0)),
+            scheduled_time=payload.get("scheduled_time", "09:00"),
+            frequency=payload.get("frequency", "once"),
+            due_date=date.fromisoformat(due_date_text),
+            completed=bool(payload.get("completed", False)),
+            priority=payload.get("priority", "medium"),
+            category=payload.get("category", "general"),
+            pet_name=payload.get("pet_name"),
+        )
+
     def mark_complete(self) -> None:
         """Mark the task as complete."""
         self.completed = True
@@ -161,6 +200,31 @@ class Pet:
     def get_pending_tasks(self) -> List[Task]:
         """Return the pet's incomplete tasks."""
         return [task for task in self.tasks if not task.completed]
+
+    def to_dict(self) -> dict:
+        """Serialize the pet and its tasks into a JSON-safe dictionary."""
+        return {
+            "name": self.name,
+            "species": self.species,
+            "breed": self.breed,
+            "care_notes": self.care_notes,
+            "tasks": [task.to_dict() for task in self.tasks],
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict) -> "Pet":
+        """Create a pet object from a JSON dictionary payload."""
+        pet = cls(
+            name=payload.get("name", ""),
+            species=payload.get("species", "other"),
+            breed=payload.get("breed", ""),
+            care_notes=payload.get("care_notes", ""),
+        )
+
+        for task_payload in payload.get("tasks", []):
+            pet.add_task(Task.from_dict(task_payload))
+
+        return pet
 
     def update_profile(
         self,
@@ -227,6 +291,46 @@ class Owner:
         """Return all incomplete tasks across all pets."""
         return [task for task in self.get_all_tasks() if not task.completed]
 
+    def to_dict(self) -> dict:
+        """Serialize the owner and all pets into a JSON-safe dictionary."""
+        return {
+            "name": self.name,
+            "available_minutes": self.available_minutes,
+            "preferences": self.preferences,
+            "pets": [pet.to_dict() for pet in self.pets],
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict) -> "Owner":
+        """Create an owner object from a JSON dictionary payload."""
+        owner = cls(
+            name=payload.get("name", "Jordan"),
+            available_minutes=int(payload.get("available_minutes", 0)),
+            preferences=payload.get("preferences", ""),
+        )
+        for pet_payload in payload.get("pets", []):
+            owner.add_pet(Pet.from_dict(pet_payload))
+        return owner
+
+    def save_to_json(self, file_path: str = "data.json") -> None:
+        """Persist owner, pets, and tasks to a JSON file."""
+        target_path = Path(file_path)
+        target_path.write_text(json.dumps(self.to_dict(), indent=2), encoding="utf-8")
+
+    @classmethod
+    def load_from_json(
+        cls,
+        file_path: str = "data.json",
+        default_owner_name: str = "Jordan",
+    ) -> "Owner":
+        """Load owner, pets, and tasks from a JSON file when available."""
+        target_path = Path(file_path)
+        if not target_path.exists():
+            return cls(default_owner_name)
+
+        payload = json.loads(target_path.read_text(encoding="utf-8"))
+        return cls.from_dict(payload)
+
     def update_preferences(self, preferences: str) -> None:
         """Update the owner's preferences text."""
         self.preferences = _normalize_text(preferences)
@@ -255,11 +359,13 @@ class Scheduler:
         return collected_tasks
 
     def sort_by_time(self, tasks: Optional[List[Task]] = None) -> List[Task]:
-        """Sort tasks by scheduled time, due date, pet, and description."""
+        """Sort tasks by priority first, then by time, date, and pet."""
+        priority_order = {"high": 0, "medium": 1, "low": 2}
         tasks_to_sort = self.collect_tasks() if tasks is None else list(tasks)
         return sorted(
             tasks_to_sort,
             key=lambda task: (
+                priority_order.get(task.priority, 3),
                 _time_to_minutes(task.scheduled_time),
                 task.due_date,
                 task.pet_name or "",
@@ -268,8 +374,52 @@ class Scheduler:
         )
 
     def sort_tasks(self) -> List[Task]:
-        """Provide a compatibility alias for the time-based sorter."""
+        """Provide a compatibility alias for the prioritized time sorter."""
         return self.sort_by_time()
+
+    def find_next_available_slot(
+        self,
+        as_of: date,
+        duration_minutes: int,
+        start_hour: int = 6,
+        end_hour: int = 22,
+        step_minutes: int = 15,
+    ) -> Optional[str]:
+        """Find the next available non-overlapping slot for the given date."""
+        if duration_minutes <= 0:
+            return None
+
+        day_tasks = [
+            task
+            for task in self.collect_tasks()
+            if task.due_date == as_of and not task.completed
+        ]
+
+        occupied = []
+        for task in day_tasks:
+            start = _time_to_minutes(task.scheduled_time)
+            occupied.append((start, start + task.time_minutes))
+
+        occupied.sort()
+
+        candidate = start_hour * 60
+        latest_start = max(candidate, end_hour * 60 - duration_minutes)
+
+        while candidate <= latest_start:
+            candidate_end = candidate + duration_minutes
+            overlap = False
+
+            for start, end in occupied:
+                if candidate < end and candidate_end > start:
+                    overlap = True
+                    break
+
+            if not overlap:
+                return _minutes_to_time(candidate)
+
+            candidate += step_minutes
+
+        return None
 
     def filter_tasks(
         self,
@@ -308,7 +458,7 @@ class Scheduler:
 
         task_names = ", ".join(task.get_summary() for task in planned_tasks)
         return (
-            f"Tasks were chosen for {self.owner.name} by time, due date, and filters: "
+            f"Tasks were chosen for {self.owner.name} by priority, time, due date, and filters: "
             f"{task_names}."
         )
 
@@ -358,3 +508,12 @@ class Scheduler:
             )
 
         return warnings
+
+    def save_to_json(self, file_path: str = "data.json") -> None:
+        """Persist scheduler owner data to disk through the owner serializer."""
+        self.owner.save_to_json(file_path)
+
+    @classmethod
+    def load_from_json(cls, file_path: str = "data.json") -> "Scheduler":
+        """Create a scheduler by loading owner and pet data from disk."""
+        return cls(owner=Owner.load_from_json(file_path))

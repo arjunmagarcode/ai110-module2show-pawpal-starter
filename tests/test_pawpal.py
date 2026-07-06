@@ -97,3 +97,11 @@ def test_detect_conflicts_reports_same_time_warning():
 
     assert warnings
     assert "Conflict on" in warnings[0]
+
+
+def test_scheduler_handles_owner_with_no_tasks():
+    owner = Owner("Jordan")
+    scheduler = Scheduler(owner)
+
+    assert scheduler.generate_schedule() == []
+    assert scheduler.detect_conflicts() == []

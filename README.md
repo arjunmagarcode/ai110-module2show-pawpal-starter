@@ -87,17 +87,22 @@ pytest
 pytest --cov
 ```
 
+The automated tests cover task completion, pet task addition, time sorting, filtering,
+recurring task rollover, conflict detection, and the empty-owner edge case.
+
+Confidence Level: ⭐⭐⭐⭐☆
+
 Sample test output:
 
 ```
 ============================= test session starts ==============================
 platform darwin -- Python 3.14.5, pytest-9.1.1, pluggy-1.6.0
 rootdir: /Users/w10182531/Desktop/ai110-module2show-pawpal-starter
-collected 6 items
+collected 7 items
 
-tests/test_pawpal.py ......                                              [100%]
+tests/test_pawpal.py .......                                             [100%]
 
-============================== 6 passed in 0.02s ===============================
+============================== 7 passed in 0.02s ===============================
 ```
 
 ## 📐 Smarter Scheduling
